@@ -16,34 +16,41 @@ input group "=== Risk Management ==="
 input bool     InpUseAutoLot   = true;      // Use Auto Lot (% Risk)
 input double   InpRiskPercent  = 1.0;       // Risk Percent per Trade (%)
 input double   InpLotSize      = 0.01;      // Fixed Lot Size (if Auto Lot is false)
+input bool     InpForceMinLot  = true;      // Force 0.01 Lot on Small Accounts
 input bool     InpUseATR_Exit  = true;      // Use ATR for SL/TP
 input double   InpATR_Multiplier_SL = 1.5;  // ATR Multiplier for SL
 input double   InpATR_Multiplier_TP = 3.0;  // ATR Multiplier for TP
-input int      InpStopLoss     = 200;       // Fixed SL (if ATR is false)
-input int      InpTakeProfit   = 400;       // Fixed TP (if ATR is false)
+input int      InpStopLoss     = 150;       // Fixed SL (if ATR is false)
+input int      InpTakeProfit   = 300;       // Fixed TP (if ATR is false)
 input int      InpMagicNumber  = 123456;    // Magic Number
 
 input group "=== Break Even Settings ==="
 input bool     InpUseBreakEven = true;      // Use Break Even
-input int      InpBreakEvenStart = 200;     // Break Even at (Points)
-input int      InpBreakEvenLock = 20;       // Lock Profit (Points)
+input int      InpBreakEvenStart = 100;     // Break Even at (Points)
+input int      InpBreakEvenLock = 10;       // Lock Profit (Points)
 
 input group "=== Trailing Stop Settings ==="
 input bool     InpUseTrailing  = true;      // Use Trailing Stop
-input int      InpTrailingStart = 300;      // Start Trailing after (Points)
-input int      InpTrailingStep  = 30;       // Trailing Step (Points)
+input int      InpTrailingStart = 150;      // Start Trailing after (Points)
+input int      InpTrailingStep  = 20;       // Trailing Step (Points)
 
-input group "=== Strategy Settings (H1 Preferred) ==="
-input int      InpEMAFast      = 10;        // Fast EMA Period
-input int      InpEMASlow      = 20;        // Slow EMA Period
-input ENUM_TIMEFRAMES InpFilterTF = PERIOD_H4; // Trend Filter Timeframe
-input int      InpFilterEMA    = 200;       // Trend Filter EMA Period
+input group "=== Strategy Settings (M15 Recommended) ==="
+input int      InpEMAFast      = 20;        // Fast EMA Period
+input int      InpEMASlow      = 50;        // Slow EMA Period
+input ENUM_TIMEFRAMES InpFilterTF = PERIOD_H1; // Trend Filter Timeframe
+input int      InpFilterEMA    = 100;       // Trend Filter EMA Period
 input int      InpStochRSIPer  = 14;        // StochRSI Period
 input int      InpKPeriod      = 3;         // %K Smoothing
 input int      InpDPeriod      = 3;         // %D Smoothing
 input int      InpATR_Period   = 14;        // ATR Period for Exit
+input int      InpADX_Period   = 14;        // ADX Period
+input int      InpADX_Min      = 20;        // ADX Min Strength
 input int      InpOSLevel      = 20;        // Oversold Level
 input int      InpOBLevel      = 80;        // Overbought Level
+
+input group "=== Session Filter (Broker Time) ==="
+input int      InpStartHour    = 8;         // Start Hour
+input int      InpEndHour      = 21;        // End Hour (e.g. 21 = 9 PM)
 
 //--- global variables
 int      handleEMAFast;
@@ -51,6 +58,7 @@ int      handleEMASlow;
 int      handleRSI;
 int      handleFilter;
 int      handleATR;
+int      handleADX;
 CTrade   trade;
 
 //+------------------------------------------------------------------+
@@ -67,15 +75,17 @@ int OnInit()
    handleRSI     = iRSI(_Symbol, _Period, InpStochRSIPer, PRICE_CLOSE);
    handleFilter  = iMA(_Symbol, InpFilterTF, InpFilterEMA, 0, MODE_EMA, PRICE_CLOSE);
    handleATR     = iATR(_Symbol, _Period, InpATR_Period);
+   handleADX     = iADX(_Symbol, _Period, InpADX_Period);
    
    if(handleEMAFast == INVALID_HANDLE || handleEMASlow == INVALID_HANDLE || 
-      handleRSI == INVALID_HANDLE || handleFilter == INVALID_HANDLE || handleATR == INVALID_HANDLE)
+      handleRSI == INVALID_HANDLE || handleFilter == INVALID_HANDLE || 
+      handleATR == INVALID_HANDLE || handleADX == INVALID_HANDLE)
    {
       Print("Error initializing indicators");
       return(INIT_FAILED);
    }
 
-   Print("EA Initialized with ATR Dynamic Exit (v1.60)");
+   Print("EA Scalping Mode Initialized (v1.70)");
    return(INIT_SUCCEEDED);
 }
 
@@ -98,6 +108,11 @@ void OnTick()
    if(InpUseBreakEven) ManageBreakEven();
    if(InpUseTrailing) ManageTrailingStop();
 
+   // Session Filter
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   if(dt.hour < InpStartHour || dt.hour > InpEndHour) return;
+
    // Signal logic remains on new bar only
    if(!IsNewBar()) return;
    
@@ -118,7 +133,7 @@ void OnTick()
    bool isCrossUp = (emaFast[1] <= emaSlow[1]) && (emaFast[0] > emaSlow[0]);
    bool isCrossDown = (emaFast[1] >= emaSlow[1]) && (emaFast[0] < emaSlow[0]);
 
-   // Get Trend Filter Value (H4)
+   // Get Trend Filter Value (H1/H4)
    double filterBuffer[];
    ArraySetAsSeries(filterBuffer, true);
    if(CopyBuffer(handleFilter, 0, 0, 1, filterBuffer) < 1) return;
@@ -126,6 +141,12 @@ void OnTick()
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    bool isTrendUp = currentPrice > filterBuffer[0];
    bool isTrendDown = currentPrice < filterBuffer[0];
+
+   // ADX Filter (Trend Strength)
+   double adxBuffer[];
+   ArraySetAsSeries(adxBuffer, true);
+   if(CopyBuffer(handleADX, 0, 0, 1, adxBuffer) < 1) return;
+   bool isStrongTrend = adxBuffer[0] > InpADX_Min;
 
    // ATR Calculation for SL/TP
    double atrBuffer[];
@@ -144,19 +165,19 @@ void OnTick()
    double lot = InpUseAutoLot ? CalculateLot(finalSL) : InpLotSize;
    if(lot <= 0) return;
 
-   // BUY Signal: EMA Cross Up AND StochRSI OK AND Trend H4 is UP
-   if(isCrossUp && stochRSI_K > InpOSLevel && isTrendUp)
+   // BUY Signal: Crossover + StochRSI + Trend Filter + ADX Strength
+   if(isCrossUp && stochRSI_K > InpOSLevel && isTrendUp && isStrongTrend)
    {
       double sl = (finalSL > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) - finalSL * _Point : 0;
       double tp = (finalTP > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) + finalTP * _Point : 0;
-      trade.Buy(lot, _Symbol, 0, sl, tp, "ATR Trend Buy");
+      trade.Buy(lot, _Symbol, 0, sl, tp, "Scalp Buy");
    }
-   // SELL Signal: EMA Cross Down AND StochRSI OK AND Trend H4 is DOWN
-   else if(isCrossDown && stochRSI_K < InpOBLevel && isTrendDown)
+   // SELL Signal
+   else if(isCrossDown && stochRSI_K < InpOBLevel && isTrendDown && isStrongTrend)
    {
       double sl = (finalSL > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) + finalSL * _Point : 0;
       double tp = (finalTP > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) - finalTP * _Point : 0;
-      trade.Sell(lot, _Symbol, 0, sl, tp, "ATR Trend Sell");
+      trade.Sell(lot, _Symbol, 0, sl, tp, "Scalp Sell");
    }
 }
 
