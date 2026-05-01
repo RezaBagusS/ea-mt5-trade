@@ -1,225 +1,148 @@
 //+------------------------------------------------------------------+
 //|                                              ZenithTrader.mq5    |
 //|                                  Copyright 2026, Antigravity AI  |
-//|                                             https://google.com   |
+//|                                      Version 5.0 (Masterclass)   |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Antigravity AI"
-#property link      "https://google.com"
-#property version   "3.2"
+#property version   "5.0"
 #property strict
 
 #include <Trade\Trade.mqh>
 
-//--- INPUT PARAMETERS
+//--- INPUTS
 input group "=== Risk Management ==="
-input double InpLotSize          = 0.01;       // Fixed Lot Size
-input int    InpMaxDailyLoss     = 3;          // Max Daily Loss (Positions)
-input int    InpMagicNumber      = 123456;     // Magic Number
-input int    InpSpreadLimit      = 30;         // Max Spread (Points)
+input double InpLotSize          = 0.01;       // Fixed Lot (Best for $20)
+input double InpMaxRiskUSD       = 1.50;       // Max Loss per Trade ($)
+input int    InpMagicNumber      = 888888;     // Professional Magic
+input int    InpMaxSpread        = 25;         // Max Spread in Points
 
-input group "=== Session Settings ==="
-input int    InpStartHour        = 8;          // Trading Start Hour
-input int    InpEndHour          = 20;         // Trading End Hour
+input group "=== Strategy Settings ==="
+input int    InpEMAPeriod        = 200;        // The Trend Filter
+input int    InpRSIPeriod        = 2;          // The Sniper (Fast RSI)
+input int    InpRSIUpper         = 90;         // Overbought
+input int    InpRSILower         = 10;         // Oversold
 
-input group "=== Protection Settings ==="
-input bool   InpUseTrailing      = false;      // Use Trailing Stop
-input int    InpTrailingStart    = 400;        // Trailing Start (Points)
-input int    InpTrailingStep     = 50;         // Trailing Step (Points)
-input bool   InpUseBreakEven     = false;      // Use Break Even
-input int    InpBreakEvenStart   = 200;        // BE Start (Points)
-input int    InpBreakEvenLock    = 20;         // BE Lock (Points)
+input group "=== Session Settings (UTC) ==="
+input int    InpStartHour        = 12;         // London Open (UTC)
+input int    InpEndHour          = 18;         // NY Overlap (UTC)
 
 //--- GLOBALS
 CTrade      trade;
-int         handleH1_Slow;
-int         handleATR;
+int         handleEMA;
+int         handleRSI;
 
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
    trade.SetExpertMagicNumber(InpMagicNumber);
+   handleEMA = iMA(_Symbol, _Period, InpEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   handleRSI = iRSI(_Symbol, _Period, InpRSIPeriod, PRICE_CLOSE);
    
-   handleH1_Slow = iMA(_Symbol, PERIOD_H1, 50, 0, MODE_EMA, PRICE_CLOSE);
-   handleATR     = iATR(_Symbol, PERIOD_M15, 14);
-   
-   if(handleH1_Slow == INVALID_HANDLE || handleATR == INVALID_HANDLE)
-   {
-      Print("Error creating handles");
-      return INIT_FAILED;
-   }
-   
+   if(handleEMA == INVALID_HANDLE || handleRSI == INVALID_HANDLE) return INIT_FAILED;
    return(INIT_SUCCEEDED);
 }
 
-//+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
-//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   IndicatorRelease(handleH1_Slow);
-   IndicatorRelease(handleATR);
+   IndicatorRelease(handleEMA);
+   IndicatorRelease(handleRSI);
 }
 
-//+------------------------------------------------------------------+
-//| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // 1. Equity Circuit Breaker (Hedge Fund Protection)
-   double initialDeposit = AccountInfoDouble(ACCOUNT_BALANCE) - AccountInfoDouble(ACCOUNT_PROFIT);
-   if(AccountInfoDouble(ACCOUNT_BALANCE) < initialDeposit * 0.85)
-   {
-      Print("!!! CIRCUIT BREAKER: 15% Drawdown reached. Trading halted for protection.");
-      return;
-   }
-
-   // 2. Fortress Protection: Check existing position & Partial TP
+   // 1. Safety First: Position Check
    if(PositionSelectByMagic(InpMagicNumber))
    {
-      double profit = PositionGetDouble(POSITION_PROFIT);
-      double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
-      double current_tp = PositionGetDouble(POSITION_TP);
-      double current_sl = PositionGetDouble(POSITION_SL);
-      ulong ticket = PositionGetInteger(POSITION_TICKET);
-      double volume = PositionGetDouble(POSITION_VOLUME);
-
-      // Emergency Hard-Close at -$2.00
-      if(profit < -2.00) { trade.PositionClose(ticket); return; }
-
-      // Partial Take Profit (Hedge Fund Secret: Lock 50% at 1:1 RR)
-      double midPoint = MathAbs(current_tp - open_price) / 3.0; // Distance to 1:1
-      if(profit > (open_price * volume * 0.01) && volume > 0.01) // Simple heuristic for 1:1
-      {
-         // In real code, we'd use more precise point math
-         // trade.PositionClosePartial(ticket, volume/2.0);
-         // trade.PositionModify(ticket, open_price, current_tp); 
-      }
+      // Trailing to BE after 1:1
+      ManageSmartProtection();
       return;
    }
 
-   // 3. Market Regime Detection
-   double adxBuf[]; ArraySetAsSeries(adxBuf, true);
-   int hADX = iADX(_Symbol, PERIOD_M15, 14);
-   CopyBuffer(hADX, 0, 0, 1, adxBuf);
-   bool isTrending = adxBuf[0] > 25.0;
-   bool isRanging = adxBuf[0] < 20.0;
-   IndicatorRelease(hADX);
+   // 2. Spread & Time Filters
+   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > InpMaxSpread) return;
+   
+   MqlDateTime dt;
+   TimeCurrent(dt);
+   if(dt.hour < InpStartHour || dt.hour > InpEndHour) return;
+   
+   if(!IsNewBar()) return;
 
-   // 4. Volatility Data (ATR)
-   double atrBuf[]; ArraySetAsSeries(atrBuf, true);
-   int hATR = iATR(_Symbol, PERIOD_M15, 14);
-   CopyBuffer(hATR, 0, 0, 1, atrBuf);
-   double volSL = atrBuf[0] * 1.5; // Dynamic SL based on volatility
-   IndicatorRelease(hATR);
+   // 3. Technical Analysis (Clean & Pro)
+   double ema[], rsi[];
+   ArraySetAsSeries(ema, true);
+   ArraySetAsSeries(rsi, true);
+   
+   if(CopyBuffer(handleEMA, 0, 0, 1, ema) < 1) return;
+   if(CopyBuffer(handleRSI, 0, 0, 2, rsi) < 2) return;
 
-   // 5. Quant Logic
-   MqlRates rates[]; ArraySetAsSeries(rates, true);
-   CopyRates(_Symbol, PERIOD_M15, 0, 20, rates);
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   if(CopyRates(_Symbol, _Period, 0, 2, rates) < 2) return;
 
-   if(isTrending) // TREND REGIME (Breakout)
+   double close = rates[0].close;
+   bool isUptrend = close > ema[0];
+   bool isDowntrend = close < ema[0];
+
+   // 4. Execution Logic (Extreme Mean Reversion)
+   // BUY: Uptrend + RSI(2) Extreme Oversold
+   bool buySignal = isUptrend && rsi[0] < InpRSILower;
+   // SELL: Downtrend + RSI(2) Extreme Overbought
+   bool sellSignal = isDowntrend && rsi[0] > InpRSIUpper;
+
+   // SL/TP based on ATR-like fixed precision for $20 account
+   double slDist = 150 * _Point; // 15 pips
+   double tpDist = 250 * _Point; // 25 pips (1:1.6 RR)
+
+   if(buySignal)
    {
-      bool buyBreak = rates[0].close > rates[1].high;
-      bool sellBreak = rates[0].close < rates[1].low;
-      
-      if(buyBreak) trade.Buy(InpLotSize, _Symbol, 0, rates[0].close - volSL, rates[0].close + volSL*3);
-      else if(sellBreak) trade.Sell(InpLotSize, _Symbol, 0, rates[0].close + volSL, rates[0].close - volSL*3);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      trade.Buy(InpLotSize, _Symbol, ask, ask - slDist, ask + tpDist, "Zenith v5 Buy");
    }
-   else if(isRanging) // RANGE REGIME (Mean Reversion)
+   else if(sellSignal)
    {
-      double bUpper[], bLower[], bMid[];
-      int hBB = iBands(_Symbol, PERIOD_M15, 20, 0, 2.0, PRICE_CLOSE);
-      CopyBuffer(hBB, 1, 0, 1, bUpper); CopyBuffer(hBB, 2, 0, 1, bLower);
-      
-      if(rates[0].low < bLower[0]) trade.Buy(InpLotSize, _Symbol, 0, rates[0].close - volSL, bUpper[0]);
-      else if(rates[0].high > bUpper[0]) trade.Sell(InpLotSize, _Symbol, 0, rates[0].close + volSL, bLower[0]);
-      IndicatorRelease(hBB);
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      trade.Sell(InpLotSize, _Symbol, bid, bid + slDist, bid - tpDist, "Zenith v5 Sell");
    }
 }
 
 //+------------------------------------------------------------------+
-//| Additional Functions                                             |
-//+------------------------------------------------------------------+
+void ManageSmartProtection()
+{
+   if(!PositionSelectByMagic(InpMagicNumber)) return;
+   
+   double profit = PositionGetDouble(POSITION_PROFIT);
+   double open = PositionGetDouble(POSITION_PRICE_OPEN);
+   ulong ticket = PositionGetInteger(POSITION_TICKET);
+   
+   // Emergency Hard-Stop ($1.50 Loss)
+   if(profit < -InpMaxRiskUSD)
+   {
+      trade.PositionClose(ticket);
+      Print("!!! EMERGENCY: Risk Limit Hit. Position Closed.");
+      return;
+   }
+   
+   // Move to Break-Even after 15 pips profit
+   double cur_sl = PositionGetDouble(POSITION_SL);
+   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
+   {
+      if(SymbolInfoDouble(_Symbol, SYMBOL_BID) - open > 150 * _Point && cur_sl < open)
+         trade.PositionModify(ticket, open + 10 * _Point, PositionGetDouble(POSITION_TP));
+   }
+   else
+   {
+      if(open - SymbolInfoDouble(_Symbol, SYMBOL_ASK) > 150 * _Point && (cur_sl > open || cur_sl == 0))
+         trade.PositionModify(ticket, open - 10 * _Point, PositionGetDouble(POSITION_TP));
+   }
+}
+
 bool IsNewBar()
 {
    static datetime last_time = 0;
    datetime lastbar_time = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
-   if(last_time == 0) { last_time = lastbar_time; return false; }
    if(last_time != lastbar_time) { last_time = lastbar_time; return true; }
    return false;
-}
-
-bool IsDailyLossLimitReached()
-{
-   int losses = 0;
-   datetime today = iTime(_Symbol, PERIOD_D1, 0);
-   HistorySelect(today, TimeCurrent());
-   for(int i = 0; i < HistoryDealsTotal(); i++)
-   {
-      ulong ticket = HistoryDealGetTicket(i);
-      if(HistoryDealGetInteger(ticket, DEAL_MAGIC) == InpMagicNumber)
-      {
-         if(HistoryDealGetDouble(ticket, DEAL_PROFIT) < 0) losses++;
-      }
-   }
-   return (losses >= InpMaxDailyLoss);
-}
-
-void ManageTrailingStop()
-{
-   if(!PositionSelectByMagic(InpMagicNumber)) return;
-   ulong ticket = PositionGetTicket(0);
-   double current_sl = PositionGetDouble(POSITION_SL);
-   double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   
-   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-   {
-      if(bid - open_price > InpTrailingStart * _Point)
-      {
-         double new_sl = bid - InpTrailingStart * _Point;
-         if(new_sl > current_sl + InpTrailingStep * _Point)
-            trade.PositionModify(ticket, NormalizeDouble(new_sl, _Digits), PositionGetDouble(POSITION_TP));
-      }
-   }
-   else
-   {
-      if(open_price - ask > InpTrailingStart * _Point)
-      {
-         double new_sl = ask + InpTrailingStart * _Point;
-         if(new_sl < current_sl - InpTrailingStep * _Point || current_sl == 0)
-            trade.PositionModify(ticket, NormalizeDouble(new_sl, _Digits), PositionGetDouble(POSITION_TP));
-      }
-   }
-}
-
-void ManageBreakEven()
-{
-   if(!PositionSelectByMagic(InpMagicNumber)) return;
-   ulong ticket = PositionGetTicket(0);
-   double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
-   double current_sl = PositionGetDouble(POSITION_SL);
-   
-   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-   {
-      if(SymbolInfoDouble(_Symbol, SYMBOL_BID) - open_price > InpBreakEvenStart * _Point)
-      {
-         double new_sl = open_price + InpBreakEvenLock * _Point;
-         if(current_sl < new_sl)
-            trade.PositionModify(ticket, NormalizeDouble(new_sl, _Digits), PositionGetDouble(POSITION_TP));
-      }
-   }
-   else
-   {
-      if(open_price - SymbolInfoDouble(_Symbol, SYMBOL_ASK) > InpBreakEvenStart * _Point)
-      {
-         double new_sl = open_price - InpBreakEvenLock * _Point;
-         if(current_sl > new_sl || current_sl == 0)
-            trade.PositionModify(ticket, NormalizeDouble(new_sl, _Digits), PositionGetDouble(POSITION_TP));
-      }
-   }
 }
 
 bool PositionSelectByMagic(long magic)

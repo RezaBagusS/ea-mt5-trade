@@ -428,4 +428,3 @@ bool PositionSelectByMagic(long magic)
    }
    return false;
 }
-
