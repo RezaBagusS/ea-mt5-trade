@@ -4,25 +4,26 @@ Proyek ini dibagi menjadi 3 fase utama untuk memastikan transisi yang aman dari 
 
 ---
 
-## 🏗️ FASE 1: Foundation & Alpha Testing (STATUS: IN PROGRESS)
+## 🏗️ FASE 1: Foundation & Alpha Testing (STATUS: COMPLETED ✅)
 **Tujuan:** Membangun core logic dan memvalidasi strategi di akun demo.
 
 - [x] **Core Architecture**: Setup struktur MQL5 (OnTick, OnInit, OnDeinit).
-- [x] **Strategy Implementation**: EMA Crossover (10/20) + RSI (14) Filter.
-- [ ] **Risk Management Upgrade**: Implementasi Auto-Lot berdasarkan % risk.
-- [ ] **Local Backtesting**: Uji coba menggunakan Strategy Tester (99% history quality).
-- [ ] **Demo Forward Testing**: Menjalankan EA di akun demo broker selama minimal 2-4 minggu.
+- [x] **Strategy Implementation**: EMA Crossover (10/20) + StochRSI Filter.
+- [x] **Multi-Timeframe Filter**: Implementasi H4 EMA 200 sebagai Trend Filter Utama.
+- [x] **Volatility Adaptation**: Implementasi ATR-based Dynamic SL/TP.
+- [x] **Risk Management Upgrade**: Auto-Lot, Break Even, dan Trailing Stop.
+- [x] **Local Backtesting**: Hasil valid (Profit Factor 2.03, Drawdown 4.95%).
 
 ---
 
-## 🚀 FASE 2: Production & Optimization (STATUS: PLANNED)
-**Tujuan:** Migrasi ke akun real dan optimalisasi infrastruktur.
+## 🚀 FASE 2: Production & Infrastructure (STATUS: IN PROGRESS 🟡)
+**Tujuan:** Migrasi ke lingkungan live dan stabilisasi.
 
-- [ ] **VPS Setup**: Instalasi MT5 di Windows VPS dengan latency rendah (< 5ms ke server broker).
-- [ ] **Real Account Pilot**: Trading di akun real dengan modal kecil (Micro/Cent account) untuk cek slippage & eksekusi.
-- [ ] **Performance Monitoring**: Integrasi dengan Myfxbook untuk tracking drawdown & profit factor secara publik.
-- [ ] **News Filter**: Integrasi fungsi untuk menghindari trading saat High Impact News.
-- [ ] **Auto-Alerts**: Notifikasi ke Telegram jika terjadi error atau posisi terbuka/tertutup.
+- [ ] **Forward Testing**: Menjalankan EA di akun demo (Live Market) selama 2-4 minggu.
+- [ ] **VPS Setup**: Instalasi di Windows VPS (Latency < 5ms).
+- [ ] **Real Account Pilot**: Trading akun Micro/Cent dengan modal minimal.
+- [ ] **Performance Monitoring**: Integrasi ke Myfxbook.
+- [ ] **Telegram Alerts**: Notifikasi posisi & error ke HP.
 
 ---
 

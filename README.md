@@ -5,18 +5,25 @@ Proyek ini bertujuan untuk membangun **Expert Advisor (EA)** profesional untuk p
 ## 🎯 Visi Proyek
 Menciptakan asisten trading otomatis yang stabil, transparan, dan dapat diandalkan untuk jangka panjang menggunakan pendekatan konfirmasi tren ganda.
 
-## 🛠️ Tech Stack
-- **Language**: MQL5 (MetaQuotes Language 5)
-- **Platform**: MetaTrader 5 Desktop
-- **Infrastructure**: Windows VPS (for 24/7 execution)
-- **Monitoring**: MQL5 Signals / Myfxbook
+## 🛠️ Tech Stack & Strategy
+- **Platform**: MetaTrader 5 (MQL5)
+- **Primary Pair**: Major Forex Pairs (EURUSD, GBPUSD, etc.)
+- **Timeframe**: H1 (Signal) & H4 (Trend Filter)
+- **Indicators**: 
+  - **EMA 10/20 Crossover**: Core signal trigger.
+  - **Stochastic RSI**: Momentum filter (OS > 20, OB < 80).
+  - **H4 EMA 200**: Trend filter (only take H1 signals in H4 direction).
+  - **ATR (14)**: Dynamic SL (1.5x) and TP (3.0x) calculation.
+- **Risk Management**: 
+  - Auto-Lot (Dynamic based on % Risk).
+  - Break Even & Trailing Stop logic.
 
-## 📊 Strategi & Analisa (v1.10)
-- **Core Logic**: EMA Fast (10) & EMA Slow (20) Crossover.
-- **Filter**: RSI (14) Level 50 (Momentum confirmation).
-- **Timeframe**: H1 (Recommended).
-- **Supported Pairs**: EURUSD, GBPUSD, USDJPY, EURJPY, GBPJPY.
-- **Risk Management**: Fixed Lot, Stop Loss, and Take Profit (Alpha version).
+## 📊 Performance (Alpha Results)
+Berdasarkan backtest data kualitas 100%:
+- **Profit Factor**: 2.03
+- **Win Rate**: 60.00%
+- **Max Drawdown**: 4.95%
+- **R:R Ratio**: 1:2 (Dynamic)
 
 ## 📁 Struktur Folder
 - `/MQL5`: Berisi source code `.mq5` dan include files `.mqh`.
