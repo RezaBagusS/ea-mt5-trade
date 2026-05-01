@@ -136,24 +136,52 @@ bool IsDailyLossLimitReached()
 
 void OnTick()
 {
-   // Protections run on every tick
-   if(InpUseBreakEven) ManageBreakEven();
-   if(InpUseTrailing) ManageTrailingStop();
+   // 1. Fortress Protection: Check existing position
+   if(PositionSelectByMagic(InpMagicNumber))
+   {
+      double current_sl = PositionGetDouble(POSITION_SL);
+      double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
+      double current_profit = PositionGetDouble(POSITION_PROFIT);
+      ulong ticket = PositionGetTicket(0);
+      
+      // Emergency Hard-Close at -$2.50
+      if(current_profit < -2.50) 
+      {
+         trade.PositionClose(ticket);
+         Print("!!! EMERGENCY CLOSE: Loss exceeded -$2.50 limit. Protecting account.");
+         return;
+      }
 
-   // Session Filter
+      // Restore Missing SL (15 pips)
+      if(current_sl <= 0)
+      {
+         ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         double sl = (type == POSITION_TYPE_BUY) ? (open_price - 150 * _Point) : (open_price + 150 * _Point);
+         trade.PositionModify(ticket, NormalizeDouble(sl, _Digits), PositionGetDouble(POSITION_TP));
+         Print(">>> SL RESTORED: Position was unprotected. Fixed 15 pips SL applied.");
+      }
+      
+      // Run protections
+      if(InpUseBreakEven) ManageBreakEven();
+      if(InpUseTrailing) ManageTrailingStop();
+      return; // Already have a position, don't open new one
+   }
+
+   // 1. Spread Filter (Max 3 pips)
+   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > 30) return;
+
+   // 2. Session Filter
    MqlDateTime dt;
    TimeCurrent(dt);
    if(dt.hour < InpStartHour || dt.hour > InpEndHour) return;
 
-   // Daily Loss Limit Check
+   // 3. Daily Loss Limit Check
    if(IsDailyLossLimitReached()) return;
 
-   // Signal logic remains on new bar only
+   // 4. Signal logic remains on new bar only
    if(!IsNewBar()) return;
-   
-   if(PositionSelectByMagic(InpMagicNumber)) return;
 
-   // 1. Get H1 Order Flow Bias
+   // 5. Get H1 Order Flow Bias
    double h1Trend[];
    ArraySetAsSeries(h1Trend, true);
    if(CopyBuffer(handleH1_Slow, 0, 0, 1, h1Trend) < 1) return;
@@ -162,47 +190,39 @@ void OnTick()
    bool isBullishBias = closeH1[0] > h1Trend[0];
    bool isBearishBias = closeH1[0] < h1Trend[0];
 
-   // 2. Detect M15 Price Leg (Swing High/Low in last 20 bars)
+   // 3. M15 Price Action (FVG Detection)
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, PERIOD_M15, 0, 20, rates) < 20) return;
+   if(CopyRates(_Symbol, PERIOD_M15, 0, 5, rates) < 5) return;
 
-   double swingHigh = rates[0].high;
-   double swingLow = rates[0].low;
-   int highIdx = 0, lowIdx = 0;
+   bool isBullishFVG = rates[2].low > rates[4].high; 
+   bool isBearishFVG = rates[2].high < rates[4].low;
 
-   for(int i=1; i<20; i++) {
-      if(rates[i].high > swingHigh) { swingHigh = rates[i].high; highIdx = i; }
-      if(rates[i].low < swingLow) { swingLow = rates[i].low; lowIdx = i; }
-   }
-
-   // 3. Fibonacci Levels Calculation
-   double diff = swingHigh - swingLow;
-   if(diff <= 0) return;
-
-   double fib618_Buy = swingHigh - (diff * 0.618);
-   double fib786_Buy = swingHigh - (diff * 0.786);
-   double fib618_Sell = swingLow + (diff * 0.618);
-   double fib786_Sell = swingLow + (diff * 0.786);
-
+   // 4. Fixed Risk Parameters (Safe for $20 account)
+   int fixedSL = 150; // 15 pips
+   int fixedTP = 300; // 30 pips (1:2 RR)
+   
+   double lot = InpLotSize; // Use fixed lot for stability on tiny accounts
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-   // 4. Entry Logic (Optimal Trade Entry - OTE)
-   // BUY: Bullish Bias + Market Shift (High formed after Low) + Price in Golden Zone
-   if(isBullishBias && highIdx < lowIdx && currentPrice <= fib618_Buy && currentPrice >= fib786_Buy)
+   // 5. Entry Logic (SMC Scalp)
+   // BUY: Bullish Bias + Bullish FVG + Price re-enters FVG
+   if(isBullishBias && isBullishFVG && rates[0].low <= rates[2].low)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = swingLow - 10 * _Point; // SL below the 100% Fib
-      double tp = swingHigh + (diff * 0.27); // TP at -27% expansion
-      trade.Buy(InpLotSize, _Symbol, 0, sl, tp, "Fib OTE Buy");
+      double sl = ask - fixedSL * _Point;
+      double tp = ask + fixedTP * _Point;
+      if(trade.Buy(lot, _Symbol, 0, sl, tp, "SMC Scalp Buy"))
+         Print(">>> Safe SMC Buy Executed. SL: 15 pips");
    }
-   // SELL: Bearish Bias + Market Shift (Low formed after High) + Price in Golden Zone
-   else if(isBearishBias && lowIdx < highIdx && currentPrice >= fib618_Sell && currentPrice <= fib786_Sell)
+   // SELL: Bearish Bias + Bearish FVG + Price re-enters FVG
+   else if(isBearishBias && isBearishFVG && rates[0].high >= rates[2].high)
    {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double sl = swingHigh + 10 * _Point; // SL above the 100% Fib
-      double tp = swingLow - (diff * 0.27); // TP at -27% expansion
-      trade.Sell(InpLotSize, _Symbol, 0, sl, tp, "Fib OTE Sell");
+      double sl = bid + fixedSL * _Point;
+      double tp = bid - fixedTP * _Point;
+      if(trade.Sell(lot, _Symbol, 0, sl, tp, "SMC Scalp Sell"))
+         Print(">>> Safe SMC Sell Executed. SL: 15 pips");
    }
 }
 
