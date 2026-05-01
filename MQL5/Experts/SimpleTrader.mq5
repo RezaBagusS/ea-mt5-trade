@@ -18,55 +18,48 @@ input double   InpRiskPercent  = 1.0;       // Risk Percent per Trade (%)
 input double   InpLotSize      = 0.01;      // Fixed Lot Size (if Auto Lot is false)
 input bool     InpForceMinLot  = true;      // Force 0.01 Lot on Small Accounts
 input bool     InpUseATR_Exit  = true;      // Use ATR for SL/TP
-input double   InpATR_Multiplier_SL = 1.5;  // ATR Multiplier for SL
-input double   InpATR_Multiplier_TP = 3.0;  // ATR Multiplier for TP
-input int      InpStopLoss     = 150;       // Fixed SL (if ATR is false)
-input int      InpTakeProfit   = 300;       // Fixed TP (if ATR is false)
+input double   InpATR_Multiplier_SL = 1.0;  // ATR SL
+input double   InpATR_Multiplier_TP = 1.5;  // ATR TP (Sniper R:R 1:1.5)
+input int      InpStopLoss     = 100;       // Fixed SL
+input int      InpTakeProfit   = 150;       // Fixed TP
 input int      InpMagicNumber  = 123456;    // Magic Number
 
 input group "=== Break Even Settings ==="
-input bool     InpUseBreakEven = true;      // Use Break Even
-input int      InpBreakEvenStart = 100;     // Break Even at (Points)
-input int      InpBreakEvenLock = 10;       // Lock Profit (Points)
+input bool     InpUseBreakEven = false;     // Disable BE for M15 (Recommended)
+input int      InpBreakEvenStart = 500;     // BE Start (Points)
+input int      InpBreakEvenLock = 20;       // BE Lock (Points)
 
 input group "=== Trailing Stop Settings ==="
-input bool     InpUseTrailing  = true;      // Use Trailing Stop
-input int      InpTrailingStart = 150;      // Start Trailing after (Points)
-input int      InpTrailingStep  = 20;       // Trailing Step (Points)
+input bool     InpUseTrailing  = true;      // Use Trailing Stop (Safety)
+input int      InpTrailingStart = 400;      // Start Trailing
+input int      InpTrailingStep  = 20;       // Trailing Step
 
-input group "=== Strategy Settings (Scalping Mode) ==="
-input int      InpHMA_Fast     = 10;        // HMA Fast Period
-input int      InpHMA_Slow     = 20;        // HMA Slow Period
-input bool     InpUseHMA       = true;      // Use HMA instead of EMA
-input ENUM_TIMEFRAMES InpFilterTF = PERIOD_H1; // Trend Filter Timeframe
-input int      InpFilterEMA    = 100;       // Trend Filter EMA Period
+input group "=== Strategy Settings (M15 Scalp / H1 Trend Master) ==="
+input int      InpH1_Fast      = 14;        // H1 Fast HMA
+input int      InpH1_Slow      = 28;        // H1 Slow HMA
+input int      InpM15_Fast     = 7;         // M15 Fast HMA (Pullback Entry)
+input int      InpM15_Slow     = 21;        // M15 Slow HMA
 
-input group "=== Bollinger Bands Filter ==="
-input bool     InpUseBB        = true;      // Use BB for Entry Filter
-input int      InpBB_Period    = 20;        // BB Period
-input double   InpBB_Dev       = 2.0;       // BB Deviation
-
-input group "=== Momentum & Strength ==="
+input group "=== Momentum (StochRSI) ==="
 input int      InpStochRSIPer  = 14;        // StochRSI Period
 input int      InpKPeriod      = 3;         // %K Smoothing
 input int      InpDPeriod      = 3;         // %D Smoothing
-input int      InpADX_Period   = 14;        // ADX Period
-input int      InpADX_Min      = 20;        // ADX Min Strength
-input int      InpATR_Period   = 14;        // ATR Period for Exit
+input int      InpOSLevel      = 20;        // Oversold
+input int      InpOBLevel      = 80;        // Overbought
 
 input group "=== Session & Protection ==="
 input int      InpStartHour    = 8;         // Start Hour
-input int      InpEndHour      = 21;        // End Hour
-input int      InpMaxDailyLoss = 2;         // Max Daily Loss (Trades)
+input int      InpEndHour      = 22;        // End Hour
+input int      InpMaxDailyLoss = 3;         // Max Daily Loss
 
 //--- global variables
-int      handleFast;
-int      handleSlow;
+int      handleM15_Fast;
+int      handleM15_Slow;
+int      handleH1_Fast;
+int      handleH1_Slow;
 int      handleRSI;
-int      handleFilter;
 int      handleATR;
 int      handleADX;
-int      handleBB;
 CTrade   trade;
 
 //+------------------------------------------------------------------+
@@ -74,36 +67,29 @@ CTrade   trade;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Setup Trade Class
    trade.SetExpertMagicNumber(InpMagicNumber);
    
-   // Initialize Indicators
-   if(InpUseHMA)
-   {
-      handleFast = iMA(_Symbol, _Period, InpHMA_Fast, 0, MODE_LWMA, PRICE_CLOSE);
-      handleSlow = iMA(_Symbol, _Period, InpHMA_Slow, 0, MODE_LWMA, PRICE_CLOSE);
-   }
-   else
-   {
-      handleFast = iMA(_Symbol, _Period, InpHMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
-      handleSlow = iMA(_Symbol, _Period, InpHMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
-   }
-
-   handleRSI     = iRSI(_Symbol, _Period, InpStochRSIPer, PRICE_CLOSE);
-   handleFilter  = iMA(_Symbol, InpFilterTF, InpFilterEMA, 0, MODE_EMA, PRICE_CLOSE);
-   handleATR     = iATR(_Symbol, _Period, InpATR_Period);
-   handleADX     = iADX(_Symbol, _Period, InpADX_Period);
-   handleBB      = iBands(_Symbol, _Period, InpBB_Period, 0, InpBB_Dev, PRICE_CLOSE);
+   // M15 Handles
+   handleM15_Fast = iMA(_Symbol, PERIOD_M15, InpM15_Fast, 0, MODE_LWMA, PRICE_CLOSE);
+   handleM15_Slow = iMA(_Symbol, PERIOD_M15, InpM15_Slow, 0, MODE_LWMA, PRICE_CLOSE);
    
-   if(handleFast == INVALID_HANDLE || handleSlow == INVALID_HANDLE || 
-      handleRSI == INVALID_HANDLE || handleFilter == INVALID_HANDLE || 
-      handleATR == INVALID_HANDLE || handleADX == INVALID_HANDLE || handleBB == INVALID_HANDLE)
+   // H1 Handles (Trend Master)
+   handleH1_Fast  = iMA(_Symbol, PERIOD_H1, InpH1_Fast, 0, MODE_LWMA, PRICE_CLOSE);
+   handleH1_Slow  = iMA(_Symbol, PERIOD_H1, InpH1_Slow, 0, MODE_LWMA, PRICE_CLOSE);
+
+   handleRSI     = iRSI(_Symbol, PERIOD_M15, InpStochRSIPer, PRICE_CLOSE);
+   handleATR     = iATR(_Symbol, PERIOD_M15, 14);
+   handleADX     = iADX(_Symbol, PERIOD_M15, 14);
+   
+   if(handleM15_Fast == INVALID_HANDLE || handleM15_Slow == INVALID_HANDLE || 
+      handleH1_Fast == INVALID_HANDLE || handleH1_Slow == INVALID_HANDLE ||
+      handleRSI == INVALID_HANDLE || handleATR == INVALID_HANDLE || handleADX == INVALID_HANDLE)
    {
       Print("Error initializing indicators");
       return(INIT_FAILED);
    }
 
-   Print("EA HMA Scalping Mode Initialized (v1.81)");
+   Print("EA H1-M15 Sync Master Initialized (v1.84)");
    return(INIT_SUCCEEDED);
 }
 
@@ -112,13 +98,13 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   IndicatorRelease(handleFast);
-   IndicatorRelease(handleSlow);
+   IndicatorRelease(handleM15_Fast);
+   IndicatorRelease(handleM15_Slow);
+   IndicatorRelease(handleH1_Fast);
+   IndicatorRelease(handleH1_Slow);
    IndicatorRelease(handleRSI);
-   IndicatorRelease(handleFilter);
    IndicatorRelease(handleATR);
    IndicatorRelease(handleADX);
-   IndicatorRelease(handleBB);
 }
 
 //+------------------------------------------------------------------+
@@ -167,78 +153,93 @@ void OnTick()
    
    if(PositionSelectByMagic(InpMagicNumber)) return;
 
-   double fastBuffer[], slowBuffer[];
-   ArraySetAsSeries(fastBuffer, true);
-   ArraySetAsSeries(slowBuffer, true);
+   // 1. Get H1 Trend Master (Safety Check)
+   double h1Fast[], h1Slow[];
+   ArraySetAsSeries(h1Fast, true);
+   ArraySetAsSeries(h1Slow, true);
+   
+   if(CopyBuffer(handleH1_Fast, 0, 0, 1, h1Fast) < 1 || CopyBuffer(handleH1_Slow, 0, 0, 1, h1Slow) < 1) return;
+   
+   bool isTrendH1_Up = h1Fast[0] > h1Slow[0];
+   bool isTrendH1_Down = h1Fast[0] < h1Slow[0];
 
-   if(CopyBuffer(handleFast, 0, 1, 2, fastBuffer) < 2) return;
-   if(CopyBuffer(handleSlow, 0, 1, 2, slowBuffer) < 2) return;
+   // 2. Get M15 Signal Indicators
+   double m15Fast[], m15Slow[];
+   ArraySetAsSeries(m15Fast, true);
+   ArraySetAsSeries(m15Slow, true);
+   if(CopyBuffer(handleM15_Fast, 0, 0, 2, m15Fast) < 2 || CopyBuffer(handleM15_Slow, 0, 0, 2, m15Slow) < 2) return;
 
-   // Calculate Stochastic RSI
    double stochRSI_K, stochRSI_D;
    if(!GetStochRSI(stochRSI_K, stochRSI_D)) return;
 
-   // Crossover detection
-   bool isCrossUp = (fastBuffer[1] <= slowBuffer[1]) && (fastBuffer[0] > slowBuffer[0]);
-   bool isCrossDown = (fastBuffer[1] >= slowBuffer[1]) && (fastBuffer[0] < slowBuffer[0]);
-
-   // Trend Filter (H1)
-   double filterBuffer[];
-   ArraySetAsSeries(filterBuffer, true);
-   if(CopyBuffer(handleFilter, 0, 0, 1, filterBuffer) < 1) return;
-   
-   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   bool isTrendUp = currentPrice > filterBuffer[0];
-   bool isTrendDown = currentPrice < filterBuffer[0];
-
-   // ADX Filter
-   double adxBuffer[];
-   ArraySetAsSeries(adxBuffer, true);
-   if(CopyBuffer(handleADX, 0, 0, 1, adxBuffer) < 1) return;
-   bool isStrongTrend = adxBuffer[0] > InpADX_Min;
-
-   // Bollinger Bands Filter
-   double bbUpper[], bbLower[];
-   ArraySetAsSeries(bbUpper, true);
-   ArraySetAsSeries(bbLower, true);
-   if(CopyBuffer(handleBB, 1, 0, 1, bbUpper) < 1) return;
-   if(CopyBuffer(handleBB, 2, 0, 1, bbLower) < 1) return;
-   
-   bool isBB_BuyOk = !InpUseBB || (currentPrice < bbLower[0] + (bbUpper[0]-bbLower[0])*0.3); // In lower 30% of BB
-   bool isBB_SellOk = !InpUseBB || (currentPrice > bbUpper[0] - (bbUpper[0]-bbLower[0])*0.3); // In upper 30% of BB
-
-   // ATR Calculation for SL/TP
+   // 3. ATR for dynamic SL/TP
    double atrBuffer[];
    ArraySetAsSeries(atrBuffer, true);
-   if(CopyBuffer(handleATR, 0, 0, 1, atrBuffer) < 1) return;
+   if(CopyBuffer(handleATR, 0, 0, 1, atrBuffer) < 1 || atrBuffer[0] <= 0) return;
    
-   int finalSL = InpStopLoss;
-   int finalTP = InpTakeProfit;
-   
-   if(InpUseATR_Exit)
-   {
-      finalSL = (int)(atrBuffer[0] * InpATR_Multiplier_SL / _Point);
-      finalTP = (int)(atrBuffer[0] * InpATR_Multiplier_TP / _Point);
-   }
+   int finalSL = (int)(atrBuffer[0] * InpATR_Multiplier_SL / _Point);
+   int finalTP = (int)(atrBuffer[0] * InpATR_Multiplier_TP / _Point);
+
+   // Ensure minimal points to avoid errors
+   if(finalSL < 50) finalSL = 50; 
+   if(finalTP < 50) finalTP = 50;
 
    double lot = InpUseAutoLot ? CalculateLot(finalSL) : InpLotSize;
    if(lot <= 0) return;
 
-   // Signal Check
-   if(isCrossUp && stochRSI_K > 20 && isTrendUp && isStrongTrend && isBB_BuyOk)
+   // 4. Signal Logic (Pure Crossover + H1 Filter)
+   bool isCrossUp = (m15Fast[1] <= m15Slow[1]) && (m15Fast[0] > m15Slow[0]);
+   bool isCrossDown = (m15Fast[1] >= m15Slow[1]) && (m15Fast[0] < m15Slow[0]);
+
+   // BUY Signal
+   if(isCrossUp && isTrendH1_Up && stochRSI_K > InpOSLevel)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = (finalSL > 0) ? ask - finalSL * _Point : 0;
-      double tp = (finalTP > 0) ? ask + finalTP * _Point : 0;
-      trade.Buy(lot, _Symbol, 0, sl, tp, "HMA Scalp Buy");
+      double sl = ask - finalSL * _Point;
+      double tp = ask + finalTP * _Point;
+      trade.Buy(lot, _Symbol, 0, sl, tp, "H1-M15 Sniper Buy");
    }
-   else if(isCrossDown && stochRSI_K < 80 && isTrendDown && isStrongTrend && isBB_SellOk)
+   // SELL Signal
+   else if(isCrossDown && isTrendH1_Down && stochRSI_K < InpOBLevel)
    {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double sl = (finalSL > 0) ? bid + finalSL * _Point : 0;
-      double tp = (finalTP > 0) ? bid - finalTP * _Point : 0;
-      trade.Sell(lot, _Symbol, 0, sl, tp, "HMA Scalp Sell");
+      double sl = bid + finalSL * _Point;
+      double tp = bid - finalTP * _Point;
+      trade.Sell(lot, _Symbol, 0, sl, tp, "H1-M15 Sniper Sell");
    }
+}
+
+//+------------------------------------------------------------------+
+//| Helper to get return code description                            |
+//+------------------------------------------------------------------+
+string GetRetcodeSelection(uint retcode)
+{
+   return(IntegerToString(retcode));
+}
+
+double CalculateLot(int slPoints)
+{
+   if(slPoints <= 0) return 0; // Prevent division by zero
+   
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   
+   if(tickValue <= 0) return InpLotSize;
+   
+   double lot = (balance * (InpRiskPercent / 100.0)) / (slPoints * tickValue);
+   
+   // Apply constraints
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   lot = MathFloor(lot / lotStep) * lotStep;
+   
+   if(InpForceMinLot && lot < 0.01) lot = 0.01;
+   if(lot < minLot) lot = minLot;
+   if(lot > maxLot) lot = maxLot;
+   
+   return lot;
 }
 
 //+------------------------------------------------------------------+
@@ -380,28 +381,6 @@ bool GetStochRSI(double &k, double &d)
    d = sumD / InpDPeriod;
    
    return true;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Dynamic Lot based on Risk %                            |
-//+------------------------------------------------------------------+
-double CalculateLot(int sl_points)
-{
-   if(sl_points <= 0) return InpLotSize;
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double risk_amount = balance * (InpRiskPercent / 100.0);
-   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tick_value <= 0 || tick_size <= 0) return InpLotSize;
-   double point_value = (tick_value / tick_size) * _Point;
-   double lot = risk_amount / (sl_points * point_value);
-   double step_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   lot = MathFloor(lot / step_lot) * step_lot;
-   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   if(lot < min_lot) lot = min_lot;
-   if(lot > max_lot) lot = max_lot;
-   return NormalizeDouble(lot, 2);
 }
 
 //+------------------------------------------------------------------+
