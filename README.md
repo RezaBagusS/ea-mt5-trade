@@ -1,16 +1,22 @@
 # 💹 EA MT5 Trade: Forex Automated Trading System
 
-Proyek ini bertujuan untuk membangun **Expert Advisor (EA)** profesional untuk platform **MetaTrader 5 (MT5)** yang difokuskan pada pasar Forex. Sistem ini dirancang dengan pendekatan kuantitatif, manajemen risiko yang ketat, dan skalabilitas untuk akun real.
+Proyek ini bertujuan untuk membangun **Expert Advisor (EA)** profesional untuk platform **MetaTrader 5 (MT5)** yang difokuskan pada pasar Forex. Sistem ini menggunakan strategi **EMA Crossover with RSI Filter**.
 
 ## 🎯 Visi Proyek
-Menciptakan asisten trading otomatis yang stabil, transparan, dan dapat diandalkan untuk jangka panjang, bukan sekadar "get-rich-quick" bot.
+Menciptakan asisten trading otomatis yang stabil, transparan, dan dapat diandalkan untuk jangka panjang menggunakan pendekatan konfirmasi tren ganda.
 
 ## 🛠️ Tech Stack
 - **Language**: MQL5 (MetaQuotes Language 5)
 - **Platform**: MetaTrader 5 Desktop
 - **Infrastructure**: Windows VPS (for 24/7 execution)
 - **Monitoring**: MQL5 Signals / Myfxbook
-- **Analysis**: Technical Indicators + Sentiment Analysis (Optional integration via WebRequest)
+
+## 📊 Strategi & Analisa (v1.10)
+- **Core Logic**: EMA Fast (10) & EMA Slow (20) Crossover.
+- **Filter**: RSI (14) Level 50 (Momentum confirmation).
+- **Timeframe**: H1 (Recommended).
+- **Supported Pairs**: EURUSD, GBPUSD, USDJPY, EURJPY, GBPJPY.
+- **Risk Management**: Fixed Lot, Stop Loss, and Take Profit (Alpha version).
 
 ## 📁 Struktur Folder
 - `/MQL5`: Berisi source code `.mq5` dan include files `.mqh`.
@@ -20,4 +26,4 @@ Menciptakan asisten trading otomatis yang stabil, transparan, dan dapat diandalk
 - `plan-live.md`: Rencana produksi, biaya, dan marketing.
 
 ---
-*Status: Development Phase (Demo Account testing)*
+*Status: Fase 1 - Alpha Development (Demo Testing)*

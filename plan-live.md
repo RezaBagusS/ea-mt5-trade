@@ -62,3 +62,4 @@ Dokumen ini merinci langkah operasional untuk membawa EA dari tahap development 
 
 ---
 *Dokumen ini diperbarui secara berkala sesuai performa EA di pasar.*
+*Update 01 Mei 2026: Strategi EMA+RSI v1.10 telah memasuki tahap Alpha Testing.*

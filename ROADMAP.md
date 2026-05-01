@@ -7,11 +7,11 @@ Proyek ini dibagi menjadi 3 fase utama untuk memastikan transisi yang aman dari 
 ## 🏗️ FASE 1: Foundation & Alpha Testing (STATUS: IN PROGRESS)
 **Tujuan:** Membangun core logic dan memvalidasi strategi di akun demo.
 
-- [ ] **Core Architecture**: Setup struktur MQL5 (OnTick, OnInit, OnDeinit).
-- [ ] **Strategy Implementation**: Penggabungan indikator (misal: RSI, EMA, ATR).
-- [ ] **Risk Management Module**: Kalkulasi lot otomatis berdasarkan % balance, SL/TP dinamis.
+- [x] **Core Architecture**: Setup struktur MQL5 (OnTick, OnInit, OnDeinit).
+- [x] **Strategy Implementation**: EMA Crossover (10/20) + RSI (14) Filter.
+- [ ] **Risk Management Upgrade**: Implementasi Auto-Lot berdasarkan % risk.
 - [ ] **Local Backtesting**: Uji coba menggunakan Strategy Tester (99% history quality).
-- [ ] **Demo Forward Testing**: Menjalankan EA di akun demo broker (misal: IC Markets / Pepperstone) selama minimal 2-4 minggu.
+- [ ] **Demo Forward Testing**: Menjalankan EA di akun demo broker selama minimal 2-4 minggu.
 
 ---
 
