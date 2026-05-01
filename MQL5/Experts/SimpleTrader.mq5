@@ -13,7 +13,9 @@
 
 //--- input parameters
 input group "=== Risk Management ==="
-input double   InpLotSize      = 0.01;      // Lot Size
+input bool     InpUseAutoLot   = true;      // Use Auto Lot (% Risk)
+input double   InpRiskPercent  = 1.0;       // Risk Percent per Trade (%)
+input double   InpLotSize      = 0.01;      // Fixed Lot Size (if Auto Lot is false)
 input int      InpStopLoss     = 200;       // Stop Loss (Points)
 input int      InpTakeProfit   = 400;       // Take Profit (Points)
 input int      InpMagicNumber  = 123456;    // Magic Number
@@ -49,7 +51,7 @@ int OnInit()
       return(INIT_FAILED);
    }
 
-   Print("EA Initialized for ", _Symbol, " on ", EnumToString(_Period));
+   Print("EA Initialized for ", _Symbol, " - Mode: ", (InpUseAutoLot ? "Auto Lot (" + DoubleToString(InpRiskPercent, 1) + "%)" : "Fixed Lot"));
    return(INIT_SUCCEEDED);
 }
 
@@ -79,7 +81,7 @@ void OnTick()
    ArraySetAsSeries(emaSlow, true);
    ArraySetAsSeries(rsi, true);
 
-   // Copy indicator data (index 1 is the last closed candle, index 2 is the one before)
+   // Copy indicator data
    if(CopyBuffer(handleEMAFast, 0, 1, 2, emaFast) < 2) return;
    if(CopyBuffer(handleEMASlow, 0, 1, 2, emaSlow) < 2) return;
    if(CopyBuffer(handleRSI, 0, 1, 1, rsi) < 1) return;
@@ -88,13 +90,17 @@ void OnTick()
    bool isCrossUp = (emaFast[1] <= emaSlow[1]) && (emaFast[0] > emaSlow[0]);
    bool isCrossDown = (emaFast[1] >= emaSlow[1]) && (emaFast[0] < emaSlow[0]);
 
+   // Calculate Lot
+   double lot = InpUseAutoLot ? CalculateLot(InpStopLoss) : InpLotSize;
+   if(lot <= 0) return;
+
    // BUY Signal
    if(isCrossUp && rsi[0] > InpRSIFilter)
    {
       double sl = (InpStopLoss > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) - InpStopLoss * _Point : 0;
       double tp = (InpTakeProfit > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) + InpTakeProfit * _Point : 0;
       
-      trade.Buy(InpLotSize, _Symbol, 0, sl, tp, "EMA Cross Buy");
+      trade.Buy(lot, _Symbol, 0, sl, tp, "EMA Cross Buy");
    }
    // SELL Signal
    else if(isCrossDown && rsi[0] < InpRSIFilter)
@@ -102,8 +108,39 @@ void OnTick()
       double sl = (InpStopLoss > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) + InpStopLoss * _Point : 0;
       double tp = (InpTakeProfit > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) - InpTakeProfit * _Point : 0;
       
-      trade.Sell(InpLotSize, _Symbol, 0, sl, tp, "EMA Cross Sell");
+      trade.Sell(lot, _Symbol, 0, sl, tp, "EMA Cross Sell");
    }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Dynamic Lot based on Risk %                            |
+//+------------------------------------------------------------------+
+double CalculateLot(int sl_points)
+{
+   if(sl_points <= 0) return InpLotSize;
+   
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double risk_amount = balance * (InpRiskPercent / 100.0);
+   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   
+   if(tick_value <= 0 || tick_size <= 0) return InpLotSize;
+   
+   // Formula: Lot = Risk / (SL_in_points * Value_of_1_point)
+   double point_value = (tick_value / tick_size) * _Point;
+   double lot = risk_amount / (sl_points * point_value);
+   
+   // Normalize Lot to Broker Requirements
+   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double max_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double step_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   lot = MathFloor(lot / step_lot) * step_lot;
+   
+   if(lot < min_lot) lot = min_lot;
+   if(lot > max_lot) lot = max_lot;
+   
+   return NormalizeDouble(lot, 2);
 }
 
 //+------------------------------------------------------------------+
