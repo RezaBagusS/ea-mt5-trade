@@ -153,59 +153,66 @@ void OnTick()
    
    if(PositionSelectByMagic(InpMagicNumber)) return;
 
-   // 1. Get H1 Trend Master (Safety Check)
-   double h1Fast[], h1Slow[];
-   ArraySetAsSeries(h1Fast, true);
-   ArraySetAsSeries(h1Slow, true);
+   // 1. Get Market Range (20 bars)
+   MqlRates rangeRates[];
+   ArraySetAsSeries(rangeRates, true);
+   if(CopyRates(_Symbol, PERIOD_M15, 0, 20, rangeRates) < 20) return;
    
-   if(CopyBuffer(handleH1_Fast, 0, 0, 1, h1Fast) < 1 || CopyBuffer(handleH1_Slow, 0, 0, 1, h1Slow) < 1) return;
-   
-   bool isTrendH1_Up = h1Fast[0] > h1Slow[0];
-   bool isTrendH1_Down = h1Fast[0] < h1Slow[0];
+   double highest = rangeRates[0].high;
+   double lowest = rangeRates[0].low;
+   for(int i=1; i<20; i++) {
+      if(rangeRates[i].high > highest) highest = rangeRates[i].high;
+      if(rangeRates[i].low < lowest) lowest = rangeRates[i].low;
+   }
+   double midPrice = (highest + lowest) / 2.0;
 
-   // 2. Get M15 Signal Indicators
-   double m15Fast[], m15Slow[];
-   ArraySetAsSeries(m15Fast, true);
-   ArraySetAsSeries(m15Slow, true);
-   if(CopyBuffer(handleM15_Fast, 0, 0, 2, m15Fast) < 2 || CopyBuffer(handleM15_Slow, 0, 0, 2, m15Slow) < 2) return;
+   // 2. Premium/Discount Check
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   bool isInDiscount = currentPrice < midPrice;
+   bool isInPremium = currentPrice > midPrice;
 
-   double stochRSI_K, stochRSI_D;
-   if(!GetStochRSI(stochRSI_K, stochRSI_D)) return;
+   // 3. M15 Price Action (FVG & MSS)
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   if(CopyRates(_Symbol, PERIOD_M15, 0, 5, rates) < 5) return;
 
-   // 3. ATR for dynamic SL/TP
+   bool isBullishFVG = rates[2].low > rates[4].high; 
+   bool isBearishFVG = rates[2].high < rates[4].low;
+
+   // MSS: Breaking the highest/lowest of the last 5 candles
+   bool isMSS_Up = rates[0].close > rates[1].high && rates[1].high > rates[2].high;
+   bool isMSS_Down = rates[0].close < rates[1].low && rates[1].low < rates[2].low;
+
+   // 4. ATR & Risk
    double atrBuffer[];
    ArraySetAsSeries(atrBuffer, true);
-   if(CopyBuffer(handleATR, 0, 0, 1, atrBuffer) < 1 || atrBuffer[0] <= 0) return;
+   if(CopyBuffer(handleATR, 0, 0, 1, atrBuffer) < 1) return;
    
-   int finalSL = (int)(atrBuffer[0] * InpATR_Multiplier_SL / _Point);
-   int finalTP = (int)(atrBuffer[0] * InpATR_Multiplier_TP / _Point);
+   int slPoints = (int)(atrBuffer[0] * 1.5 / _Point);
+   if(slPoints < 60) slPoints = 60;
+   int tpPoints = slPoints * 3; // Strict 1:3
 
-   // Ensure minimal points to avoid errors
-   if(finalSL < 50) finalSL = 50; 
-   if(finalTP < 50) finalTP = 50;
-
-   double lot = InpUseAutoLot ? CalculateLot(finalSL) : InpLotSize;
+   double lot = InpUseAutoLot ? CalculateLot(slPoints) : InpLotSize;
    if(lot <= 0) return;
 
-   // 4. Signal Logic (Pure Crossover + H1 Filter)
-   bool isCrossUp = (m15Fast[1] <= m15Slow[1]) && (m15Fast[0] > m15Slow[0]);
-   bool isCrossDown = (m15Fast[1] >= m15Slow[1]) && (m15Fast[0] < m15Slow[0]);
-
-   // BUY Signal
-   if(isCrossUp && isTrendH1_Up && stochRSI_K > InpOSLevel)
+   // 5. Pro SMC Entry Logic
+   // BUY: Price in Discount + Bullish FVG + MSS Up
+   if(isInDiscount && isBullishFVG && isMSS_Up)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = ask - finalSL * _Point;
-      double tp = ask + finalTP * _Point;
-      trade.Buy(lot, _Symbol, 0, sl, tp, "H1-M15 Sniper Buy");
+      double sl = ask - slPoints * _Point;
+      double tp = ask + tpPoints * _Point;
+      // Disable Trailing for this trade by setting a unique magic if needed, 
+      // but here we just execute and expect manual/global management to respect TP.
+      trade.Buy(lot, _Symbol, 0, sl, tp, "Pro SMC Buy");
    }
-   // SELL Signal
-   else if(isCrossDown && isTrendH1_Down && stochRSI_K < InpOBLevel)
+   // SELL: Price in Premium + Bearish FVG + MSS Down
+   else if(isInPremium && isBearishFVG && isMSS_Down)
    {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double sl = bid + finalSL * _Point;
-      double tp = bid - finalTP * _Point;
-      trade.Sell(lot, _Symbol, 0, sl, tp, "H1-M15 Sniper Sell");
+      double sl = bid + slPoints * _Point;
+      double tp = bid - tpPoints * _Point;
+      trade.Sell(lot, _Symbol, 0, sl, tp, "Pro SMC Sell");
    }
 }
 
