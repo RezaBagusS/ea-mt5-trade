@@ -68,35 +68,56 @@ void OnTick()
 
    if(!IsNewBar()) return;
 
-   // 3. Candle Range Theory (CRT) Analysis
+   // 3. Technical Analysis (Whale Hunter)
    MqlRates rates[]; ArraySetAsSeries(rates, true);
    if(CopyRates(_Symbol, _Period, 0, 3, rates) < 3) return;
 
-   double ema[]; ArraySetAsSeries(ema, true);
-   if(CopyBuffer(handleEMA, 0, 0, 1, ema) < 1) return;
+   double ema200[], ema50[]; 
+   ArraySetAsSeries(ema200, true); ArraySetAsSeries(ema50, true);
+   int hEMA50 = iMA(_Symbol, _Period, 50, 0, MODE_EMA, PRICE_CLOSE);
+   
+   if(CopyBuffer(handleEMA, 0, 0, 1, ema200) < 1) return;
+   if(CopyBuffer(hEMA50, 0, 0, 1, ema50) < 1) { IndicatorRelease(hEMA50); return; }
+   IndicatorRelease(hEMA50);
 
-   // CRT Parameters: Previous Candle [1]
+   // WHALE FILTER: Monster Expansion (> 2.0x ATR)
    double candleRange = rates[1].high - rates[1].low;
    double candleBody  = MathAbs(rates[1].close - rates[1].open);
    
-   // Logic: Expansion Candle = Big Body + High Momentum (> 1.2x ATR)
-   bool isExpansion = (candleRange > avgRange * 1.2) && (candleBody / candleRange > 0.7);
-   bool isBullish   = rates[1].close > rates[1].open;
-   bool isBearish   = rates[1].close < rates[1].open;
-   bool isTrendUp   = rates[0].close > ema[0];
-   bool isTrendDown = rates[0].close < ema[0];
+   bool isWhaleExpansion = (candleRange > avgRange * 2.0) && (candleBody / candleRange > 0.85);
+   bool isBullish        = rates[1].close > rates[1].open;
+   bool isBearish        = rates[1].close < rates[1].open;
+   
+   bool isTrendUp   = rates[0].close > ema200[0] && ema50[0] > ema200[0];
+   bool isTrendDown = rates[0].close < ema200[0] && ema50[0] < ema200[0];
 
-   // 4. CRT Entry Logic
-   if(isExpansion && isBullish && isTrendUp)
+   // 4. Whale Hunter Entry Logic (1:4 RR)
+   double midPoint = rates[1].low + (candleRange / 2.0);
+   
+   if(isWhaleExpansion && isBullish && isTrendUp)
    {
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      // TP is 1.5x the size of the expansion candle
-      trade.Buy(InpLotSize, _Symbol, ask, ask - 150 * _Point, ask + (candleRange * 1.5));
+      double sl = rates[1].low - 20 * _Point; 
+      double tp = midPoint + (MathAbs(midPoint - sl) * 4.0); // 1:4 RR
+      
+      CleanOldOrders();
+      trade.BuyLimit(InpLotSize, midPoint, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Zenith v8 Whale");
    }
-   else if(isExpansion && isBearish && isTrendDown)
+   else if(isWhaleExpansion && isBearish && isTrendDown)
    {
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      trade.Sell(InpLotSize, _Symbol, bid, bid + 150 * _Point, bid - (candleRange * 1.5));
+      double sl = rates[1].high + 20 * _Point;
+      double tp = midPoint - (MathAbs(sl - midPoint) * 4.0); // 1:4 RR
+      
+      CleanOldOrders();
+      trade.SellLimit(InpLotSize, midPoint, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Zenith v8 Whale");
+   }
+}
+
+void CleanOldOrders()
+{
+   for(int i=OrdersTotal()-1; i>=0; i--) {
+      ulong ticket = OrderGetTicket(i);
+      if(OrderSelect(ticket) && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
+         trade.OrderDelete(ticket);
    }
 }
 
@@ -107,27 +128,22 @@ void ManageSmartProtection()
    
    double profit = PositionGetDouble(POSITION_PROFIT);
    double open = PositionGetDouble(POSITION_PRICE_OPEN);
+   double cur_sl = PositionGetDouble(POSITION_SL);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    ulong ticket = PositionGetInteger(POSITION_TICKET);
    
-   // Emergency Hard-Stop ($1.50 Loss)
-   if(profit < -InpMaxRiskUSD)
-   {
-      trade.PositionClose(ticket);
-      Print("!!! EMERGENCY: Risk Limit Hit. Position Closed.");
-      return;
-   }
+   if(profit < -InpMaxRiskUSD) { trade.PositionClose(ticket); return; }
    
-   // Move to Break-Even after 15 pips profit
-   double cur_sl = PositionGetDouble(POSITION_SL);
-   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-   {
-      if(SymbolInfoDouble(_Symbol, SYMBOL_BID) - open > 150 * _Point && cur_sl < open)
-         trade.PositionModify(ticket, open + 10 * _Point, PositionGetDouble(POSITION_TP));
-   }
-   else
-   {
-      if(open - SymbolInfoDouble(_Symbol, SYMBOL_ASK) > 150 * _Point && (cur_sl > open || cur_sl == 0))
-         trade.PositionModify(ticket, open - 10 * _Point, PositionGetDouble(POSITION_TP));
+   // Breakeven at 1:1, then Trail aggressively
+   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) {
+      double risk = open - cur_sl;
+      if(bid - open > risk && cur_sl < open)
+         trade.PositionModify(ticket, open + 20 * _Point, PositionGetDouble(POSITION_TP));
+   } else {
+      double risk = cur_sl - open;
+      if(open - ask > risk && (cur_sl > open || cur_sl == 0))
+         trade.PositionModify(ticket, open - 20 * _Point, PositionGetDouble(POSITION_TP));
    }
 }
 
