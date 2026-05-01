@@ -1,39 +1,28 @@
-# 🗺️ Roadmap Pengembangan: EA MT5 Trade
+# ZenithTrader Project Roadmap 🗺️
 
-Proyek ini dibagi menjadi 3 fase utama untuk memastikan transisi yang aman dari strategi di atas kertas hingga menjadi aset yang menghasilkan.
+## ✅ Phase 1: Foundation (Completed)
+- [x] Basic EMA Crossover Strategy
+- [x] Simple Take Profit & Stop Loss
+- [x] Multi-Timeframe Trend Filter
 
----
+## ✅ Phase 2: Institutional Quant (Completed)
+- [x] SMC (Smart Money Concepts) Integration
+- [x] Market Structure Shift (MSS) detection
+- [x] **v6.0 - v8.0: Candle Range Theory (CRT) Implementation**
+- [x] **v8.0: 50% Retracement Limit Order Logic (The Discount Entry)**
+- [x] Double EMA (50/200) Trend Stabilization
 
-## 🏗️ FASE 1: Foundation & Alpha Testing (STATUS: COMPLETED ✅)
-**Tujuan:** Membangun core logic dan memvalidasi strategi di akun demo.
+## ✅ Phase 3: Risk & Robustness (Completed)
+- [x] ATR-Based Dynamic Volatility Filter
+- [x] Equity Circuit Breaker (15-20% total drawdown)
+- [x] **v8.0: 1:4 High-Reward Ratio optimization**
+- [x] **v8.0: Power of 2 Daily Loss Limit**
 
-- [x] **Core Architecture**: Setup struktur MQL5 (OnTick, OnInit, OnDeinit).
-- [x] **Strategy Implementation**: EMA Crossover (10/20) + StochRSI Filter.
-- [x] **Multi-Timeframe Filter**: Implementasi H4 EMA 200 sebagai Trend Filter Utama.
-- [x] **Volatility Adaptation**: Implementasi ATR-based Dynamic SL/TP.
-- [x] **Risk Management Upgrade**: Auto-Lot, Break Even, dan Trailing Stop.
-- [x] **Local Backtesting**: Hasil valid (Profit Factor 2.03, Drawdown 4.95%).
+## 🚀 Phase 4: Scaling & Portfolio (Current)
+- [ ] Multi-Pair Optimization (GBPUSD, USDJPY)
+- [ ] News API Integration (Auto-stop during High Impact News)
+- [ ] Equity Compounding Logic (Auto-lot scaling)
 
----
-
-## 🚀 FASE 2: Production & Infrastructure (STATUS: IN PROGRESS 🟡)
-**Tujuan:** Migrasi ke lingkungan live dan stabilisasi.
-
-- [ ] **Forward Testing**: Menjalankan EA di akun demo (Live Market) selama 2-4 minggu.
-- [ ] **VPS Setup**: Instalasi di Windows VPS (Latency < 5ms).
-- [ ] **Real Account Pilot**: Trading akun Micro/Cent dengan modal minimal.
-- [ ] **Performance Monitoring**: Integrasi ke Myfxbook.
-- [ ] **Telegram Alerts**: Notifikasi posisi & error ke HP.
-
----
-
-## 💰 FASE 3: Scaling & Marketing (STATUS: PLANNED)
-**Tujuan:** Monetisasi dan membangun reputasi.
-
-- [ ] **MQL5 Market Listing**: Publikasi EA di marketplace resmi MQL5 (Free/Paid).
-- [ ] **Copy Trading / Signal Service**: Membuka layanan sinyal di MQL5 Signals.
-- [ ] **Community Building**: Pembuatan grup Telegram/Discord untuk edukasi dan update performa.
-- [ ] **White Label / Licensing**: Sistem lisensi per account number untuk penjualan private.
-
----
-*Dokumentasi diperbarui: 01 Mei 2026*
+## 🤖 Phase 5: AI & Sentiment (Future)
+- [ ] GPT-4o Sentiment Integration (Trade only if News Sentiment is aligned)
+- [ ] Machine Learning Parameter Optimizer (Self-tuning ATR multipliers)
