@@ -153,66 +153,56 @@ void OnTick()
    
    if(PositionSelectByMagic(InpMagicNumber)) return;
 
-   // 1. Get Market Range (20 bars)
-   MqlRates rangeRates[];
-   ArraySetAsSeries(rangeRates, true);
-   if(CopyRates(_Symbol, PERIOD_M15, 0, 20, rangeRates) < 20) return;
-   
-   double highest = rangeRates[0].high;
-   double lowest = rangeRates[0].low;
-   for(int i=1; i<20; i++) {
-      if(rangeRates[i].high > highest) highest = rangeRates[i].high;
-      if(rangeRates[i].low < lowest) lowest = rangeRates[i].low;
-   }
-   double midPrice = (highest + lowest) / 2.0;
+   // 1. Get H1 Order Flow Bias
+   double h1Trend[];
+   ArraySetAsSeries(h1Trend, true);
+   if(CopyBuffer(handleH1_Slow, 0, 0, 1, h1Trend) < 1) return;
+   double closeH1[];
+   if(CopyClose(_Symbol, PERIOD_H1, 0, 1, closeH1) < 1) return;
+   bool isBullishBias = closeH1[0] > h1Trend[0];
+   bool isBearishBias = closeH1[0] < h1Trend[0];
 
-   // 2. Premium/Discount Check
-   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   bool isInDiscount = currentPrice < midPrice;
-   bool isInPremium = currentPrice > midPrice;
-
-   // 3. M15 Price Action (FVG & MSS)
+   // 2. Detect M15 Price Leg (Swing High/Low in last 20 bars)
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, PERIOD_M15, 0, 5, rates) < 5) return;
+   if(CopyRates(_Symbol, PERIOD_M15, 0, 20, rates) < 20) return;
 
-   bool isBullishFVG = rates[2].low > rates[4].high; 
-   bool isBearishFVG = rates[2].high < rates[4].low;
+   double swingHigh = rates[0].high;
+   double swingLow = rates[0].low;
+   int highIdx = 0, lowIdx = 0;
 
-   // MSS: Breaking the highest/lowest of the last 5 candles
-   bool isMSS_Up = rates[0].close > rates[1].high && rates[1].high > rates[2].high;
-   bool isMSS_Down = rates[0].close < rates[1].low && rates[1].low < rates[2].low;
+   for(int i=1; i<20; i++) {
+      if(rates[i].high > swingHigh) { swingHigh = rates[i].high; highIdx = i; }
+      if(rates[i].low < swingLow) { swingLow = rates[i].low; lowIdx = i; }
+   }
 
-   // 4. ATR & Risk
-   double atrBuffer[];
-   ArraySetAsSeries(atrBuffer, true);
-   if(CopyBuffer(handleATR, 0, 0, 1, atrBuffer) < 1) return;
-   
-   int slPoints = (int)(atrBuffer[0] * 1.5 / _Point);
-   if(slPoints < 60) slPoints = 60;
-   int tpPoints = slPoints * 3; // Strict 1:3
+   // 3. Fibonacci Levels Calculation
+   double diff = swingHigh - swingLow;
+   if(diff <= 0) return;
 
-   double lot = InpUseAutoLot ? CalculateLot(slPoints) : InpLotSize;
-   if(lot <= 0) return;
+   double fib618_Buy = swingHigh - (diff * 0.618);
+   double fib786_Buy = swingHigh - (diff * 0.786);
+   double fib618_Sell = swingLow + (diff * 0.618);
+   double fib786_Sell = swingLow + (diff * 0.786);
 
-   // 5. Pro SMC Entry Logic
-   // BUY: Price in Discount + Bullish FVG + MSS Up
-   if(isInDiscount && isBullishFVG && isMSS_Up)
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+   // 4. Entry Logic (Optimal Trade Entry - OTE)
+   // BUY: Bullish Bias + Market Shift (High formed after Low) + Price in Golden Zone
+   if(isBullishBias && highIdx < lowIdx && currentPrice <= fib618_Buy && currentPrice >= fib786_Buy)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = ask - slPoints * _Point;
-      double tp = ask + tpPoints * _Point;
-      // Disable Trailing for this trade by setting a unique magic if needed, 
-      // but here we just execute and expect manual/global management to respect TP.
-      trade.Buy(lot, _Symbol, 0, sl, tp, "Pro SMC Buy");
+      double sl = swingLow - 10 * _Point; // SL below the 100% Fib
+      double tp = swingHigh + (diff * 0.27); // TP at -27% expansion
+      trade.Buy(InpLotSize, _Symbol, 0, sl, tp, "Fib OTE Buy");
    }
-   // SELL: Price in Premium + Bearish FVG + MSS Down
-   else if(isInPremium && isBearishFVG && isMSS_Down)
+   // SELL: Bearish Bias + Market Shift (Low formed after High) + Price in Golden Zone
+   else if(isBearishBias && lowIdx < highIdx && currentPrice >= fib618_Sell && currentPrice <= fib786_Sell)
    {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double sl = bid + slPoints * _Point;
-      double tp = bid - tpPoints * _Point;
-      trade.Sell(lot, _Symbol, 0, sl, tp, "Pro SMC Sell");
+      double sl = swingHigh + 10 * _Point; // SL above the 100% Fib
+      double tp = swingLow - (diff * 0.27); // TP at -27% expansion
+      trade.Sell(InpLotSize, _Symbol, 0, sl, tp, "Fib OTE Sell");
    }
 }
 
