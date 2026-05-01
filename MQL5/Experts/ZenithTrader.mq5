@@ -59,50 +59,44 @@ void OnTick()
       return;
    }
 
-   // 2. Spread & Time Filters
-   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > InpMaxSpread) return;
-   
-   MqlDateTime dt;
-   TimeCurrent(dt);
-   if(dt.hour < InpStartHour || dt.hour > InpEndHour) return;
-   
+   // 2. Volatility Data (ATR for Range Baseline)
+   double atrBuf[]; ArraySetAsSeries(atrBuf, true);
+   int hATR = iATR(_Symbol, _Period, 14);
+   if(CopyBuffer(hATR, 0, 0, 1, atrBuf) < 1) { IndicatorRelease(hATR); return; }
+   double avgRange = atrBuf[0];
+   IndicatorRelease(hATR);
+
    if(!IsNewBar()) return;
 
-   // 3. Technical Analysis (Clean & Pro)
-   double ema[], rsi[];
-   ArraySetAsSeries(ema, true);
-   ArraySetAsSeries(rsi, true);
-   
+   // 3. Candle Range Theory (CRT) Analysis
+   MqlRates rates[]; ArraySetAsSeries(rates, true);
+   if(CopyRates(_Symbol, _Period, 0, 3, rates) < 3) return;
+
+   double ema[]; ArraySetAsSeries(ema, true);
    if(CopyBuffer(handleEMA, 0, 0, 1, ema) < 1) return;
-   if(CopyBuffer(handleRSI, 0, 0, 2, rsi) < 2) return;
 
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, _Period, 0, 2, rates) < 2) return;
+   // CRT Parameters: Previous Candle [1]
+   double candleRange = rates[1].high - rates[1].low;
+   double candleBody  = MathAbs(rates[1].close - rates[1].open);
+   
+   // Logic: Expansion Candle = Big Body + High Momentum (> 1.2x ATR)
+   bool isExpansion = (candleRange > avgRange * 1.2) && (candleBody / candleRange > 0.7);
+   bool isBullish   = rates[1].close > rates[1].open;
+   bool isBearish   = rates[1].close < rates[1].open;
+   bool isTrendUp   = rates[0].close > ema[0];
+   bool isTrendDown = rates[0].close < ema[0];
 
-   double close = rates[0].close;
-   bool isUptrend = close > ema[0];
-   bool isDowntrend = close < ema[0];
-
-   // 4. Execution Logic (Extreme Mean Reversion)
-   // BUY: Uptrend + RSI(2) Extreme Oversold
-   bool buySignal = isUptrend && rsi[0] < InpRSILower;
-   // SELL: Downtrend + RSI(2) Extreme Overbought
-   bool sellSignal = isDowntrend && rsi[0] > InpRSIUpper;
-
-   // SL/TP based on ATR-like fixed precision for $20 account
-   double slDist = 150 * _Point; // 15 pips
-   double tpDist = 250 * _Point; // 25 pips (1:1.6 RR)
-
-   if(buySignal)
+   // 4. CRT Entry Logic
+   if(isExpansion && isBullish && isTrendUp)
    {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      trade.Buy(InpLotSize, _Symbol, ask, ask - slDist, ask + tpDist, "Zenith v5 Buy");
+      // TP is 1.5x the size of the expansion candle
+      trade.Buy(InpLotSize, _Symbol, ask, ask - 150 * _Point, ask + (candleRange * 1.5));
    }
-   else if(sellSignal)
+   else if(isExpansion && isBearish && isTrendDown)
    {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      trade.Sell(InpLotSize, _Symbol, bid, bid + slDist, bid - tpDist, "Zenith v5 Sell");
+      trade.Sell(InpLotSize, _Symbol, bid, bid + 150 * _Point, bid - (candleRange * 1.5));
    }
 }
 
