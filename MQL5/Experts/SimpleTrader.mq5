@@ -52,6 +52,7 @@ input int      InpKPeriod      = 3;         // %K Smoothing
 input int      InpDPeriod      = 3;         // %D Smoothing
 input int      InpADX_Period   = 14;        // ADX Period
 input int      InpADX_Min      = 20;        // ADX Min Strength
+input int      InpATR_Period   = 14;        // ATR Period for Exit
 
 input group "=== Session & Protection ==="
 input int      InpStartHour    = 8;         // Start Hour
@@ -79,15 +80,13 @@ int OnInit()
    // Initialize Indicators
    if(InpUseHMA)
    {
-      // HMA uses LWMA logic but calculated manually in OnTick or via multiple handles
-      // For simplicity, we'll initialize handles for the base WMAs
       handleFast = iMA(_Symbol, _Period, InpHMA_Fast, 0, MODE_LWMA, PRICE_CLOSE);
       handleSlow = iMA(_Symbol, _Period, InpHMA_Slow, 0, MODE_LWMA, PRICE_CLOSE);
    }
    else
    {
-      handleFast = iMA(_Symbol, _Period, InpEMAFast, 0, MODE_EMA, PRICE_CLOSE);
-      handleSlow = iMA(_Symbol, _Period, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE);
+      handleFast = iMA(_Symbol, _Period, InpHMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
+      handleSlow = iMA(_Symbol, _Period, InpHMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
    }
 
    handleRSI     = iRSI(_Symbol, _Period, InpStochRSIPer, PRICE_CLOSE);
@@ -104,7 +103,7 @@ int OnInit()
       return(INIT_FAILED);
    }
 
-   Print("EA HMA Scalping Mode Initialized (v1.80)");
+   Print("EA HMA Scalping Mode Initialized (v1.81)");
    return(INIT_SUCCEEDED);
 }
 
@@ -113,9 +112,13 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   IndicatorRelease(handleEMAFast);
-   IndicatorRelease(handleEMASlow);
+   IndicatorRelease(handleFast);
+   IndicatorRelease(handleSlow);
    IndicatorRelease(handleRSI);
+   IndicatorRelease(handleFilter);
+   IndicatorRelease(handleATR);
+   IndicatorRelease(handleADX);
+   IndicatorRelease(handleBB);
 }
 
 //+------------------------------------------------------------------+
