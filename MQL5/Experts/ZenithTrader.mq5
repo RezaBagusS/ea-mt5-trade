@@ -11,13 +11,15 @@
 
 //--- INPUTS
 input group "=== Risk Management ==="
-input double InpLotSize          = 0.01;       // Fixed Lot (Best for $20)
-input double InpMaxRiskUSD       = 1.50;       // Max Loss per Trade ($)
-input int    InpMagicNumber      = 888888;     // Professional Magic
-input int    InpMaxSpread        = 25;         // Max Spread in Points
+input double InpLotSize      = 0.01;      // Lot Size
+input double InpMaxRiskUSD   = 1.5;       // Max Loss per Position ($)
+input int    InpMagicNumber  = 888888;    // Magic Number
+input int    InpStartHour    = 8;         // Session Start (UTC)
+input int    InpEndHour      = 16;        // Session End (UTC)
+input int    InpMaxSpread    = 25;        // Max Spread in Points
 
 input group "=== Strategy Settings ==="
-input int    InpEMAPeriod        = 200;        // The Trend Filter
+input int    InpEMAPeriod        = 200;        // The Trend Filter (M30 Recommended)
 input int    InpRSIPeriod        = 2;          // The Sniper (Fast RSI)
 input int    InpRSIUpper         = 90;         // Overbought
 input int    InpRSILower         = 10;         // Oversold
@@ -51,15 +53,25 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // 1. Safety First: Position Check
+   // 1. Session Filter: Only trade during London/NY (UTC)
+   MqlDateTime dt;
+   TimeTradeServer(dt);
+   bool isSession = (dt.hour >= InpStartHour && dt.hour < InpEndHour);
+
+   // 2. Safety First: Position Check
    if(PositionSelectByMagic(InpMagicNumber))
    {
-      // Trailing to BE after 1:1
       ManageSmartProtection();
       return;
    }
 
-   // 2. Volatility Data (ATR for Range Baseline)
+   if(!isSession) 
+   {
+      CleanOldOrders(); // Clear pending orders outside session
+      return;
+   }
+
+   // 3. Volatility Data (ATR for Range Baseline)
    double atrBuf[]; ArraySetAsSeries(atrBuf, true);
    int hATR = iATR(_Symbol, _Period, 14);
    if(CopyBuffer(hATR, 0, 0, 1, atrBuf) < 1) { IndicatorRelease(hATR); return; }
@@ -91,24 +103,27 @@ void OnTick()
    bool isTrendUp   = rates[0].close > ema200[0] && ema50[0] > ema200[0];
    bool isTrendDown = rates[0].close < ema200[0] && ema50[0] < ema200[0];
 
-   // 4. Whale Hunter Entry Logic (1:4 RR)
+    // 4. Multi-Adaptive Entry Logic (Whale Hunter)
    double midPoint = rates[1].low + (candleRange / 2.0);
+   double buffer = (_Symbol == "GBPUSD") ? 100 * _Point : 30 * _Point; // Wider buffer for GBP
    
    if(isWhaleExpansion && isBullish && isTrendUp)
    {
-      double sl = rates[1].low - 20 * _Point; 
-      double tp = midPoint + (MathAbs(midPoint - sl) * 4.0); // 1:4 RR
+      double sl = rates[1].low - buffer; 
+      double risk = midPoint - sl;
+      double tp = midPoint + (risk * 4.0); // 1:4 RR
       
       CleanOldOrders();
-      trade.BuyLimit(InpLotSize, midPoint, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Zenith v8 Whale");
+      trade.BuyLimit(InpLotSize, midPoint, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Zenith v8.1 Adaptive");
    }
    else if(isWhaleExpansion && isBearish && isTrendDown)
    {
-      double sl = rates[1].high + 20 * _Point;
-      double tp = midPoint - (MathAbs(sl - midPoint) * 4.0); // 1:4 RR
+      double sl = rates[1].high + buffer;
+      double risk = sl - midPoint;
+      double tp = midPoint - (risk * 4.0); // 1:4 RR
       
       CleanOldOrders();
-      trade.SellLimit(InpLotSize, midPoint, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Zenith v8 Whale");
+      trade.SellLimit(InpLotSize, midPoint, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Zenith v8.1 Adaptive");
    }
 }
 
@@ -132,17 +147,23 @@ void ManageSmartProtection()
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    ulong ticket = PositionGetInteger(POSITION_TICKET);
+   long type = PositionGetInteger(POSITION_TYPE);
    
    if(profit < -InpMaxRiskUSD) { trade.PositionClose(ticket); return; }
    
-   // Breakeven at 1:1, then Trail aggressively
-   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) {
-      double risk = open - cur_sl;
-      if(bid - open > risk && cur_sl < open)
+   // TIME-EXIT: Expansion should be fast. Close after 8 bars (2 hours on M15)
+   datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+   if(TimeCurrent() - openTime > 8 * 15 * 60) {
+      if(profit > 0) { trade.PositionClose(ticket); return; } // Take small win
+   }
+
+   // ADAPTIVE BREAK-EVEN: Move to BE only after 1.5x Risk (to avoid GBP whipsaws)
+   double riskSize = MathAbs(open - cur_sl);
+   if(type == POSITION_TYPE_BUY) {
+      if(bid - open > riskSize * 1.5 && cur_sl < open)
          trade.PositionModify(ticket, open + 20 * _Point, PositionGetDouble(POSITION_TP));
    } else {
-      double risk = cur_sl - open;
-      if(open - ask > risk && (cur_sl > open || cur_sl == 0))
+      if(open - ask > riskSize * 1.5 && (cur_sl > open || cur_sl == 0))
          trade.PositionModify(ticket, open - 20 * _Point, PositionGetDouble(POSITION_TP));
    }
 }
